@@ -1,0 +1,32 @@
+                             DBD::Altera
+
+               A DBD driver for Altera SQL Server
+               ----------------------------------
+
+                      Initial release 0.09
+                      --------------------
+
+ To install, execute the following commands:
+
+     perl Makefile.PL
+     make
+     make install
+
+ This will take care of installing the driver at the correct place in the
+ perl directory tree.
+
+ The driver is a single perl module; there is no XS, no compilation involved,
+ so there is nothing that can go wrong with the installation. After completing
+ the installation, you should read the POD (run 'perldoc DBD::Altera') to
+ familiarize yourself with the peculiarities of this driver. A good working
+ knowledge of DBI is indispensable, because no tutorial or other help is
+ included. Visit the DBI homepage at http://www.hermetica.com/technologia/DBI 
+ to find out more.
+
+ This is the initial release of the driver. It could misbehave in various ways.
+ (That's why it's not 1.00; because it may lack a final touch).
+ Please visit the primary download site at http://www.altera.gr/download.html
+ to know about consequent releases. Email any problems to dsouflis@altera.gr .
+
+ This software is covered by the GNU Library Public License (see 
+ http://www.gnu.org for the text).
