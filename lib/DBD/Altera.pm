@@ -25,7 +25,12 @@ this driver.
 
 =head1 CURRENT VERSION
 
-Release 0.09 (one bit short of 1.00).
+Release 0.10 (one hair short of 1.00). Main difference from previous version
+0.09 is minor alterations to permit use for AGI (Altera Gateway Interface).
+In other words, how can one use the same module to write both DBI programs
+and stored procedures for the Altera SQL Server. Also, stored procedures
+are now supported, using the pseudo-SQL "call xxx ..." statement. See
+the documentation of Altera SQL Server for details.
 
 =head1 DRIVER-SPECIFIC BEHAVIOR
 
@@ -436,6 +441,8 @@ sub BYTE_ORDER_BIG() {1}
  sub FUNC_CURSOR_GET_BM() {32}
  sub FUNC_CURSOR_GOTO_BM() {33}
  sub FUNC_CANCEL() {34}
+ sub FUNC_CALL() {35}
+ sub FUNC_BULK() {36}
 
 
 #
@@ -651,13 +658,13 @@ sub _plain_mesg($$) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},$func);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
  $ret==RET_OK;
@@ -683,14 +690,16 @@ sub sqlConnect($$$$) {
  return undef unless $ret==RET_OK;
  $DBD::Altera::lowlevel::_outcome=c_ok;
  my @empty_array=();
- { 
+ {
      'endianity'    =>$endianity,
-     'thesocket'    =>$so,
+     'osocket'      =>$so,
+     'isocket'      =>$so,
      'stmts'        =>\@empty_array,
      'AutoCommit'   =>1,
      'PrintError'   =>1,
      'RaiseError'   =>0,
      'Active'       =>1,
+     'AGI'          =>0,
  };
 }
 
@@ -703,16 +712,16 @@ sub sqlDisconnect($) {
  $$connref{'Active'}=0;
  my @arg=(0,0,FUNC_LOGOUT);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$connref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
- $$connref{thesocket}->close() or return undef;
+ $$connref{osocket}->close() or return undef;
  $ret==RET_OK;
 }
 
@@ -721,11 +730,11 @@ sub sqlAllocStmt($) {
  unless(defined($connref)) { return undef; }
  my @arg=(0,0,FUNC_ALLOC_STMT);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  unless($len==2) { return undef; }
  if ($ret==RET_ERROR) { return undef; }
  my ($stmt)=_unpack($$connref{endianity},"B",$buf);
@@ -772,13 +781,13 @@ sub sqlPutParam($$$) {
      @arg=(2,0,FUNC_PUT_PARAM,$num);
      $buf=_pack($$connref{endianity},"BBBB",\@arg);
  }
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
  $ret==RET_OK;
@@ -795,13 +804,13 @@ sub sqlPrepare($$) {
  my $connref=$$stmtref{'Database'};
  my @arg=(length($cmd)+1,$$stmtref{stmt_handle},FUNC_PREPARE,$cmd);
  my $buf=_pack($$connref{endianity},"BBBz",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
  $ret==RET_OK;
@@ -811,15 +820,20 @@ sub sqlExecDirect($$) {
  my $stmtref=shift;
  my $cmd=shift;
  my $connref=$$stmtref{'Database'};
- my @arg=(length($cmd)+1,$$stmtref{stmt_handle},FUNC_EXEC_DIRECT,$cmd);
+ my $func=FUNC_EXEC_DIRECT;
+ if($cmd~=/call (.*)/i) {
+     $func=FUNC_CALL;
+     $cmd=$1;
+ }
+ my @arg=(length($cmd)+1,$$stmtref{stmt_handle},$func,$cmd);
  my $buf=_pack($$connref{endianity},"BBBz",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
  $ret==RET_OK;
@@ -841,13 +855,13 @@ sub sqlSetCursorName($$) {
  my $connref=$$stmtref{'Database'};
  my @arg=(length($cname)+1,$$stmtref{stmt_handle},FUNC_SET_NAME,$cname);
  my $buf=_pack($$connref{endianity},"BBBz",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return undef;
  }
  $ret==RET_OK;
@@ -858,13 +872,13 @@ sub sqlGetCursorName($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_GET_NAME);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      my ($x)=_unpack($$connref{endianity},"z",$buf);
      return $x;
  }
@@ -876,13 +890,13 @@ sub sqlGetExecutionPlan($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_GET_EXEC_PLAN);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      my ($x)=_unpack($$connref{endianity},"z",$buf);
      return $x;
  }
@@ -894,13 +908,13 @@ sub sqlGetNativeQuery($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_GET_NATIVE_QUERY);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      my ($x)=_unpack($$connref{endianity},"z",$buf);
      return $x;
  }
@@ -912,13 +926,13 @@ sub sqlGetRowCount($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_GET_ROW_COUNT);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len!=0) {
-     $$connref{thesocket}->read($buf,$len) or return undef;
+     $$connref{isocket}->read($buf,$len) or return undef;
      return _unpack($$connref{endianity},"C",$buf);
  }
  undef;
@@ -965,9 +979,9 @@ sub sqlSetIntOption($$$$) {
  }
  my @arg=(0,$stmt_handle,$func,$option,$value);
  my $buf=_pack($$connref{endianity},"BBBbc",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  if(defined($stmtref)) {
      $$stmtref{pending}=$pending;
@@ -990,9 +1004,9 @@ sub sqlGetIntOption($$$) {
  }
  my @arg=(0,$stmt_handle,$func,$option);
  my $buf=_pack($$connref{endianity},"BBBb",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  if(defined($stmtref)) {
      $$stmtref{pending}=$pending;
@@ -1002,7 +1016,7 @@ sub sqlGetIntOption($$$) {
  if($len!=4) {
      return undef;
  }
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  _unpack($$connref{endianity},"c",$buf);
 }
 
@@ -1028,9 +1042,9 @@ sub sqlGetDiagnostics($$) {
  }
  my @arg=(2,$stmt_handle,$func,64*1024-10);
  my $buf=_pack($$connref{endianity},"BBBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  if($len==0) {
      if($pending!=0) {
@@ -1038,7 +1052,7 @@ sub sqlGetDiagnostics($$) {
      }
      return 1;           #ok, no diagnostics
  }
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  my ($diags)=_unpack($$connref{endianity},"z",$buf);
  $diags;
 }
@@ -1094,13 +1108,13 @@ sub sqlGetParamDescr($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_DESCRIBE_PARAMS);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len==0) { return undef; }
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  my ($colnb)=_unpack($$connref{endianity},"B",$buf); $buf=substr($buf,2);
  my @params=_unpack_coldefs($$connref{endianity},$colnb,$buf);
  $$stmtref{paramcount}=$colnb;
@@ -1150,13 +1164,13 @@ sub sqlGetOutputColDescr($) {
  my $connref=$$stmtref{'Database'};
  my @arg=(0,$$stmtref{stmt_handle},FUNC_DESCRIBE_RES_COLS);
  my $buf=_pack($$connref{endianity},"BBB",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len==0) { return undef; }
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  my ($colnb)=_unpack($$connref{endianity},"B",$buf); $buf=substr($buf,2);
  my @res=_unpack_coldefs($$connref{endianity},$colnb,$buf);
  $$stmtref{colnb}=$colnb;
@@ -1335,13 +1349,13 @@ sub sqlCursorMove($$$$) {
  my $connref=$$stmtref{'Database'};
  my @arg=(6,$$stmtref{stmt_handle},$func,$fetch,$irow);
  my $buf=_pack($$connref{endianity},"BBBBC",\@arg);
- $$connref{thesocket}->write($buf,length($buf)) or return undef;
- $$connref{thesocket}->flush() or return undef;
- $$connref{thesocket}->read($buf,6) or return undef;
+ $$connref{osocket}->write($buf,length($buf)) or return undef;
+ $$connref{osocket}->flush() or return undef;
+ $$connref{isocket}->read($buf,6) or return undef;
  my ($len,$ret,$pending)=_unpack($$connref{endianity},"BBB",$buf);
  $$stmtref{pending}=$pending;
  if($len==0) { return undef; }
- $$connref{thesocket}->read($buf,$len) or return undef;
+ $$connref{isocket}->read($buf,$len) or return undef;
  if($ret!=RET_OK) {
      return undef;
  }
@@ -1454,7 +1468,7 @@ package DBD::Altera;
 
 use vars qw($VERSION);      #so that VERSION_FROM will work
 
-$VERSION="0.09";
+$VERSION="0.10";
 $DBD::Altera::drh=undef;
 @DBD::Altera::connections=();
 $DBD::Altera::err='';
@@ -1470,6 +1484,32 @@ sub driver {
           'Errstr'       => \$DBD::Altera::errStr,
           'Atribution'   => 'DBD::Altera by Dimitrios Souflis',
      });
+}
+
+sub AGIdb() {
+ my ($ofh,$ifh);
+ $ofh=new IO::Handle;
+ $ifh=new IO::Handle;
+ if(!$ifh->fdopen(fileno(STDIN),"r")) {
+     return undef;
+ }
+ if(!$ofh->fdopen(fileno(STDOUT),"w")) {
+     return undef;
+ }
+ my @empty_array=();
+ bless {
+     'endianity'    =>$DBD::Altera::lowlevel::_local_byte_order,
+     'isocket'      =>$ifh,
+     'osocket'      =>$ofh,
+     'stmts'        =>\@empty_array,
+     'AutoCommit'   =>1,
+     'PrintError'   =>0,
+     'RaiseError'   =>0,
+     'Active'       =>1,
+     'AGI'          =>1,
+     'Err'          => \$DBD::Altera::err,
+     'Errstr'       => \$DBD::Altera::errStr,
+ }, 'DBD::Altera::db';
 }
 
 package DBD::Altera::dr;
@@ -1582,6 +1622,9 @@ sub err {
 
 sub DESTROY {
  my $self=shift;
+ if($$self{'AGI'}) {
+     return 1;
+ }
  DBD::Altera::lowlevel::sqlDisconnect($self);
 }
 
@@ -1590,7 +1633,7 @@ sub disconnect {
  my $i;
  ${$self->{'Errstr'}}='';
  for($i=0; $i<scalar(@DBD::Altera::connections);$i++) {
-     if($DBD::Altera::connections[$i]->{thesocket}==$self->{thesocket}) {
+     if($DBD::Altera::connections[$i]->{osocket}==$self->{osocket}) {
           splice(@DBD::Altera::connections,$i,1);
           last;
      }
@@ -1608,6 +1651,9 @@ sub do {
  ${$self->{'Errstr'}}='';
  my $stmtref=_reuse_stmt($self);
  if(!defined($stmtref)) {
+     if($$self{'AGI'}) {
+          return undef;
+     }
      $stmtref=DBD::Altera::lowlevel::sqlAllocStmt($self);
      if(!defined($stmtref)) {
           _w($self,DBD::Altera::lowlevel::sqlGetConnDiagnostics($self));
@@ -1621,20 +1667,26 @@ sub do {
      $ret1=DBD::Altera::lowlevel::sqlPrepare($stmtref,$cmd);
      if(!$ret1) {
           _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($stmtref));
-          DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+          if(!$$self{'AGI'}) {
+               DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+          }
           return undef;
      }
      my $parnb=DBD::Altera::lowlevel::sqlGetParamNb($stmtref);
      if($parnb!=scalar(@params)) {
           _w($self,'07001 Wrong number of parameters');
-          DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+          if(!$$self{'AGI'}) {
+               DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+          }
           return undef;
      }
      my $i;
      for($i=1; $i<=$parnb; $i++) {
           my $rv=bind_param($self,$i,$params[$i-1]);
           if(!$rv) {
-               DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+               if(!$$self{'AGI'}) {
+                    DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+               }
                return undef;
           }
      }
@@ -1644,15 +1696,19 @@ sub do {
  }
  if(!$ret1) {
      _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($stmtref));
-     DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+     if(!$$self{'AGI'}) {
+          DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+     }
      return undef;
  }
  my $rows=DBD::Altera::lowlevel::sqlGetRowCount($stmtref);
  if($$self{'Autocommit'}) {
-     my $ret2=DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
-     if(!$ret2) {
-          _w($self,DBD::Altera::lowlevel::sqlGetConnDiagnostics($self));
-          return undef;
+     if(!$$self{'AGI'}) {
+          my $ret2=DBD::Altera::lowlevel::sqlFreeStmt($stmtref);
+          if(!$ret2) {
+               _w($self,DBD::Altera::lowlevel::sqlGetConnDiagnostics($self));
+               return undef;
+          }
      }
  } else {
      my $stmts=$$self{stmts};
@@ -1669,15 +1725,18 @@ sub prepare {
  ${$self->{'Errstr'}}='';
  my $stmtref=_reuse_stmt($self);
  if(!defined($stmtref)) {
+     if($$self{'AGI'}) {
+          return undef;
+     }
      $stmtref=DBD::Altera::lowlevel::sqlAllocStmt($self);
      if(!defined($stmtref)) {
-          _w($self,DBD::Altera::lowlevel::sqlGetConnDiagnostics($self));
+          _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($self));
           return undef;
      }
  }
  my $ret=DBD::Altera::lowlevel::sqlPrepare($stmtref,$cmd);
  if(!$ret) {
-     _w($self,DBD::Altera::lowlevel::sqlGetConnDiagnostics($self));
+     _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($self));
      return undef;
  }
  if(!DBD::Altera::lowlevel::sqlGetOutputColDescr($stmtref)) {
@@ -1690,10 +1749,16 @@ sub prepare {
      _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($stmtref));
      return undef;
  }
- my ($sth,$h)=DBI::_new_sth($self,$stmtref,undef);
- my $stmts=$$self{stmts};
- push(@$stmts,$h);
- $sth;
+ if(!$$self{'AGI'}) {
+     my ($sth,$h)=DBI::_new_sth($self,$stmtref,undef);
+     my $stmts=$$self{stmts};
+     push(@$stmts,$h);
+     return $sth;
+ } else {
+     my $stmts=$$self{stmts};
+     push(@$stmts,$stmtref);
+     return $stmtref;
+ }
 }
 
 sub commit {
@@ -1720,8 +1785,10 @@ sub _trans {
           _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($target));
      }
      $ret &&= $ret2;
-     $ret2=DBD::Altera::lowlevel::sqlFreeStmt($target);
-     _delete_stmt_handle($self,$$target{stmt_handle});
+     if(!$$self{'AGI'}) {
+          $ret2=DBD::Altera::lowlevel::sqlFreeStmt($target);
+          _delete_stmt_handle($self,$$target{stmt_handle});
+     }
      if(!$ret2) {
           _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($target));
      }
@@ -1748,6 +1815,17 @@ sub _reuse_stmt {
  my $self=shift;
  my $stmts=$$self{stmts};
  my $i;
+ if(scalar(@$stmts)==0 && $$self{'AGI'}==1) {
+     return bless {
+          'Database'=>$self,
+          stmt_handle=>0,  # dummy handle
+          rowset_size=>1,
+          currrow=>0,
+          'Active'=>1,
+          'Err'          => \$DBD::Altera::err,
+          'Errstr'       => \$DBD::Altera::errStr,
+     }, 'DBD::Altera::st';
+ }
  for($i=0; $i<scalar(@$stmts); $i++) {
      my $target=$$stmts[$i];
      if(!$$target{'Active'}) {
@@ -1832,14 +1910,16 @@ sub execute {
      my $parnb=$$self{paramcount};
      if($parnb!=scalar(@params)) {
           _w($self,'07001 Wrong number of parameters');
-          DBD::Altera::lowlevel::sqlFreeStmt($self);
-          _delete_stmt_handle($$self{'Database'},$$self{stmt_handle});
+          if(!$$self{'AGI'}) {
+               DBD::Altera::lowlevel::sqlFreeStmt($self);
+               _delete_stmt_handle($$self{'Database'},$$self{stmt_handle});
+          }
           return undef;
      }
      my $i;
      for($i=1; $i<=$parnb; $i++) {
           my $rv=bind_param($self,$i,$params[$i-1]);
-          if(!$rv) {
+          if(!$rv && !$$self{'AGI'}) {
                DBD::Altera::lowlevel::sqlFreeStmt($self);
                _delete_stmt_handle($$self{'Database'},$$self{stmt_handle});
                return undef;
@@ -1861,6 +1941,10 @@ sub execute {
 
 sub DESTROY {
  my $self=shift;
+ my $connref=$$self{'Database'};
+ if($$connref{'AGI'}) {
+     return 1;
+ }
  $self->finish;
 }
 

@@ -3,8 +3,8 @@
                A DBD driver for Altera SQL Server
                ----------------------------------
 
-                      Initial release 0.09
-                      --------------------
+                      Release 0.10
+                      ------------
 
  To install, execute the following commands:
 
@@ -23,8 +23,11 @@
  included. Visit the DBI homepage at http://www.hermetica.com/technologia/DBI 
  to find out more.
 
- This is the initial release of the driver. It could misbehave in various ways.
+ This is the second release of the driver. It could misbehave in various ways.
  (That's why it's not 1.00; because it may lack a final touch).
+ The main difference from the first release, is that it now contains the
+ functionality needed to write stored procedures for the Altera SQL Server
+ using the AGI protocol.
  Please visit the primary download site at http://www.altera.gr/download.html
  to know about consequent releases. Email any problems to dsouflis@altera.gr .
 
