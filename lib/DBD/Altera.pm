@@ -821,7 +821,7 @@ sub sqlExecDirect($$) {
  my $cmd=shift;
  my $connref=$$stmtref{'Database'};
  my $func=FUNC_EXEC_DIRECT;
- if($cmd~=/call (.*)/i) {
+ if($cmd =~ /call (.*)/i) {
      $func=FUNC_CALL;
      $cmd=$1;
  }
@@ -1736,7 +1736,7 @@ sub prepare {
  }
  my $ret=DBD::Altera::lowlevel::sqlPrepare($stmtref,$cmd);
  if(!$ret) {
-     _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($self));
+     _w($self,DBD::Altera::lowlevel::sqlGetStmtDiagnostics($stmtref));
      return undef;
  }
  if(!DBD::Altera::lowlevel::sqlGetOutputColDescr($stmtref)) {

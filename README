@@ -3,7 +3,7 @@
                A DBD driver for Altera SQL Server
                ----------------------------------
 
-                      Release 0.10
+                      Release 0.11
                       ------------
 
  To install, execute the following commands:
@@ -23,7 +23,7 @@
  included. Visit the DBI homepage at http://www.hermetica.com/technologia/DBI 
  to find out more.
 
- This is the second release of the driver. It could misbehave in various ways.
+ This is the third release of the driver. It could misbehave in various ways.
  (That's why it's not 1.00; because it may lack a final touch).
  The main difference from the first release, is that it now contains the
  functionality needed to write stored procedures for the Altera SQL Server
